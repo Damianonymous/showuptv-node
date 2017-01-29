@@ -201,13 +201,19 @@ function getCommandArguments(modelName) {
 
               if (json.id === 102 && json.value[0]) {
                 if (json.value[0] === 'failure') {
+                  connection.close();
+
                   reject('Model might be offline');
                 } else if (json.value[0] === 'alreadyJoined') {
+                  connection.close();
+
                   reject('Another stream of this model exists');
                 }
               }
 
               if (json.id === 103 && json.value[0]) {
+                connection.close();
+
                 resolve({
                   streamServer: streamServer,
                   playpath: json.value[0]
