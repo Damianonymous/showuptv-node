@@ -12,6 +12,7 @@ var mkdirp = require('mkdirp');
 var moment = require('moment');
 var yaml = require('js-yaml');
 var WebSocketClient = require('websocket').client;
+var mvAsync = Promise.promisify(require('mv'));
 
 var session = bhttp.session();
 var modelsCurrentlyCapturing = [];
@@ -41,19 +42,12 @@ function getCurrentDateTime() {
   return moment().format('YYYY-MM-DDTHHmmss'); // The only true way of writing out dates and times, ISO 8601
 }
 
-function printMsg(msg) {
-  console.log(colors.blue('[' + getCurrentDateTime() + ']'), msg);
+function printMsg(...args) {
+  console.log.apply(console, [colors.gray('[' + moment().format('MM/DD/YYYY - HH:mm:ss') + ']'), ...args]);
 }
 
-function printErrorMsg(msg) {
-  console.log(colors.blue('[' + getCurrentDateTime() + ']'), colors.red('[ERROR]'), msg);
-}
-
-function printDebugMsg(msg) {
-  if (config.debug && msg) {
-    console.log(colors.blue('[' + getCurrentDateTime() + ']'), colors.yellow('[DEBUG]'), msg);
-  }
-}
+var printErrorMsg = printMsg.bind(printMsg, colors.red('[ERROR]'));
+var printDebugMsg = config.debug ? printMsg.bind(printMsg, colors.yellow('[DEBUG]')) : () => {};
 
 function getTimestamp() {
   return Math.floor(new Date().getTime() / 1000);
@@ -93,7 +87,7 @@ function login() {
     .timeout(15000, 'Failed to login');
 }
 
-function getFavouriteModels() {
+function getOnlineFavouriteModels() {
   return Promise
     .try(() => session.get('http://showup.tv/site/favorites', {
       headers: {
@@ -107,53 +101,31 @@ function getFavouriteModels() {
         throw new Error('Failed to get favorite models');
       }
 
-      var favouriteModels = _.chain(json.list.split(';')).reject(m => !m).map(m => m.split(',')[1]).value();
+      var favouriteModels = _.chain(json.list.split(';'))
+        .reject(m => !m)
+        .map(m => m.split(','))
+        .map(m => {
+          return {
+            uid: m[0],
+            name: m[1]
+          };
+        })
+        .value();
 
-      printDebugMsg('Found these favorite models: ' + favouriteModels.join(', '));
+      var onlineFavouriteModels = _.reject(favouriteModels, m => !json.online.find(o => (o.uid === m.uid)));
 
-      return favouriteModels;
+      printDebugMsg('Found these favorite models: ' + _.map(onlineFavouriteModels, m => m.name).join(', '));
+
+      return onlineFavouriteModels;
     })
     .timeout(15000, 'Failed to get favourite models');
 }
 
-function domainToIp(s) {
-  var ip = '';
-  var t = s.split(':');
-
-  if (t[0] === 'j12.showup.tv') {
-    ip = '94.23.171.122';
-  } else if (t[0] === 'j13.showup.tv') {
-    ip = '94.23.171.121';
-  } else if (t[0] === 'j11.showup.tv') {
-    ip = '94.23.171.115';
-  } else if (t[0] === 'j14.showup.tv') {
-    ip = '94.23.171.120';
-  }
-
-  return !ip ? `ws://${s}` : `ws://${ip}:${t[1]}`;
-}
-
-function getCommandArguments(modelName) {
+function getCommandArguments(model) {
   return Promise
-    .try(() => session.get('http://showup.tv/' + modelName))
+    .try(() => session.get('http://showup.tv/' + model.name))
     .then((response) => {
       var rawHTML = response.body.toString('utf8');
-
-      var streamData = rawHTML.match(/'rtmp:\/\/([\s\S]+?)\/liveedge'/);
-
-      if (!streamData || !streamData[1]) {
-        throw new Error('streamData is unavailable');
-      }
-
-      var streamServer = streamData[1];
-
-      var user = rawHTML.match(/var user = new User\(([\s\S]+?),/);
-
-      if (!user || !user[1]) {
-        throw new Error('streamServer is unavailable');
-      }
-
-      var wsUID = user[1];
 
       var startChildBug = rawHTML.match(/startChildBug\(user\.uid, '([\s\S]+?)', '([\s\S]+?)'/);
 
@@ -161,26 +133,25 @@ function getCommandArguments(modelName) {
         throw new Error('startChildBug is unavailable');
       }
 
-      var wsPassword = startChildBug[1];
-      var serverAddr = startChildBug[2];
+      let csrf = startChildBug[1];
+      let wsUrl = startChildBug[2];
 
-      if (!wsPassword) {
-        throw new Error('wsPassword is unavailable');
+      printMsg(csrf, wsUrl);
+
+      var user = rawHTML.match(/var user = new User\(([\s\S]+?),/);
+
+      if (!user || !user[1]) {
+        throw new Error('User\'s uid is unavailable');
       }
 
-      if (!serverAddr) {
-        throw new Error('serverAddr is unavailable');
-      }
+      let userUid = user[1];
 
-      var wsUrl = domainToIp(serverAddr);
+      printMsg(userUid);
 
-      // printDebugMsg(streamServer);
-      // printDebugMsg(wsUID);
-      // printDebugMsg(wsPassword);
-      // printDebugMsg(wsUrl);
 
       return new Promise((resolve, reject) => {
         var client = new WebSocketClient();
+        var commandArguments = {};
 
         client.on('connectFailed', (err) => {
           reject(err);
@@ -208,77 +179,77 @@ function getCommandArguments(modelName) {
                   connection.close();
 
                   reject('Another stream of this model exists');
+                } else {
+                  commandArguments.streamServer = json.value[1];
+
+                  if (commandArguments.playpath) {
+                    connection.close();
+
+                    resolve(commandArguments);
+                  }
                 }
               }
 
               if (json.id === 103 && json.value[0]) {
-                connection.close();
+                commandArguments.playpath = json.value[0] + '_aac';
 
-                resolve({
-                  streamServer: streamServer,
-                  playpath: json.value[0]
-                });
+                if (commandArguments.streamServer) {
+                  connection.close();
+
+                  resolve(commandArguments);
+                }
               }
             }
           });
 
-          connection.sendUTF(`{ "id": 0, "value": [${wsUID}, "${wsPassword}"]}`);
-          connection.sendUTF(`{ "id": 2, "value": ["${modelName}"]}`);
+          connection.sendUTF(`{ "id": 0, "value": [${userUid}, "${csrf}"]}`);
+          connection.sendUTF(`{ "id": 2, "value": ["${model.name}"]}`);
         });
 
-        client.connect(wsUrl, '');
+        client.connect(`ws://${wsUrl}`, '');
       });
     })
     .timeout(15000);
 }
 
-function createCaptureProcess(modelName) {
-  var model = _.findWhere(modelsCurrentlyCapturing, { modelName: modelName });
+function createCaptureProcess(model) {
+  var capturingModel = _.findWhere(modelsCurrentlyCapturing, { modelName: model.name });
 
-  if (!_.isUndefined(model)) {
-    printDebugMsg(colors.green(modelName) + ' is already capturing');
+  if (!_.isUndefined(capturingModel)) {
+    printDebugMsg(colors.green(model.name) + ' is already capturing');
     return; // resolve immediately
   }
 
   return Promise
     .try(() => {
-      return getCommandArguments(modelName);
+      return getCommandArguments(model);
     }).then((commandArguments) => {
-      printMsg(colors.green(modelName) + ' is now online, starting rtmpdump process');
+      printMsg(colors.green(model.name) + ' is now online, starting rtmpdump process');
 
-      var filename = modelName + '_' + getCurrentDateTime() + '.flv';
+      var filename = model.name + '_' + getCurrentDateTime() + '.flv';
 
       var spawnArguments = [
         '--live',
-        '-a',
-        'liveedge',
         config.rtmpDebug ? '' : '--quiet',
-        '-s',
-        'http://showup.tv/flash/suStreamer.swf',
-        '--rtmp',
-        `rtmp://${commandArguments.streamServer}/liveedge`,
-        '--pageUrl',
-        'http://showup.tv/' + modelName,
-        '--playpath',
-        commandArguments.playpath,
-        '--flv',
-        captureDirectory + '/' + filename
+        '--rtmp', `rtmp://${commandArguments.streamServer}:1935/webrtc`,
+        '--playpath', commandArguments.playpath,
+        '--flv', captureDirectory + '/' + filename
       ];
 
-      // printDebugMsg(spawnArguments);
+      printDebugMsg(spawnArguments);
 
       var captureProcess = childProcess.spawn('rtmpdump', spawnArguments);
 
       captureProcess.stdout.on('data', (data) => {
-        printMsg(data.toString);
+        printMsg(data.toString());
       });
 
       captureProcess.stderr.on('data', (data) => {
-        printMsg(data.toString);
+        printMsg(data.toString());
       });
 
       captureProcess.on('close', (code) => {
-        printMsg(colors.green(modelName) + ' stopped streaming');
+        printMsg(colors.green(model.name) + ' stopped streaming');
 
         var stoppedModel = _.findWhere(modelsCurrentlyCapturing, { pid: captureProcess.pid });
 
@@ -290,30 +261,22 @@ function createCaptureProcess(modelName) {
           }
         }
 
-        fs.stat(captureDirectory + '/' + filename, (err, stats) => {
-          if (err) {
-            if (err.code === 'ENOENT') {
-              // do nothing, file does not exists
-            } else {
-              printErrorMsg('[' + colors.green(modelName) + '] ' + err.toString());
+        let src = captureDirectory + '/' + filename;
+        let dst = completeDirectory + '/' + filename;
+
+        fs.statAsync(src)
+          // if the file is big enough we keep it otherwise we delete it
+          .then(stats => (stats.size <= config.minFileSizeMb * 1048576) ? fs.unlinkAsync(src) : mvAsync(src, dst, { mkdirp: true }))
+          .catch(err => {
+            if (err.code !== 'ENOENT') {
+              printErrorMsg('[' + colors.green(model.name) + '] ' + err.toString());
             }
-          } else if (stats.size === 0 || stats.size < (config.minFileSizeMb * 1048576)) {
-            fs.unlink(captureDirectory + '/' + filename, (e) => {
-              // do nothing, shit happens
-            });
-          } else {
-            fs.rename(captureDirectory + '/' + filename, completeDirectory + '/' + filename, (e) => {
-              if (e) {
-                printErrorMsg('[' + colors.green(modelName) + '] ' + err.toString());
-              }
-            });
-          }
-        });
+          });
       });
 
       if (!_.isUndefined(captureProcess.pid)) {
         modelsCurrentlyCapturing.push({
-          modelName: modelName,
+          modelName: model.name,
           filename: filename,
           captureProcess: captureProcess,
           pid: captureProcess.pid,
@@ -323,7 +286,7 @@ function createCaptureProcess(modelName) {
       }
     })
     .catch((err) => {
-      printErrorMsg('[' + colors.green(modelName) + '] ' + err.toString());
+      printErrorMsg('[' + colors.green(model.name) + '] ' + err.toString());
     });
 }
 
@@ -371,8 +334,8 @@ function mainLoop() {
 
   Promise
     .try(() => login())
-    .then(() => getFavouriteModels())
-    .then((favouriteModels) => Promise.all(favouriteModels.map(createCaptureProcess)))
+    .then(() => getOnlineFavouriteModels())
+    .then((onlineFavouriteModels) => Promise.all(onlineFavouriteModels.map(createCaptureProcess)))
     .then(() => Promise.all(modelsCurrentlyCapturing.map(checkCaptureProcess)))
     .catch((err) => {
       printErrorMsg(err);
