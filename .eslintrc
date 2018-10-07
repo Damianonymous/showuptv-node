@@ -1,42 +1,17 @@
 {
   "parser": "babel-eslint",
-  "extends": "airbnb/legacy",
+  "extends": "airbnb-base",
   "env": {
     "browser": true,
-    "jquery": true
+    "jquery": true,
   },
   "globals": {
-  	"_": true,
-  	"hljs": true,
-  	"google": true,
-  	"angular": true
+    "google": true,
+    "angular": true
   },
   "rules": {
-    "quotes": [2, "single"],
-    "comma-dangle": [2, "never"],
-    "func-names": [1, "never"],
-    "max-len": 0,
-    "wrap-iife": [2, "inside"],
-    "dot-notation": [2, {
-    	"allowKeywords": true,
-    	"allowPattern": "^(delete|finally)$"
-    }],
-    "no-param-reassign": [2, {
-    	"props": false }
-   	],
-    "no-mixed-operators": [2, {
-        "groups": []
-    }],
-    "no-unused-vars": [2, {
-        "args": "none"
-    }],
-    "vars-on-top": 0,
-    "no-use-before-define": [2, {
-    	"functions": true,
-    	"classes": true
-    }],
-	"no-underscore-dangle": [2, {
-		"allow": ["_id"]
-	}]
+    "no-param-reassign": [2, { "props": false }],
+    "prefer-arrow-callback": 0,
+    "func-names": [1, "never"]
   }
 }

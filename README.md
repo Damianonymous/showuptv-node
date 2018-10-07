@@ -18,16 +18,7 @@ You can help me to improve this script by [buying me a coffee](https://ko-fi.com
 Setup
 ===========
 
-Install requirements, run `npm install` in the same folder as main.js is.
-
-Get a [showup.tv account](https://showup.tv), once you're signed up put your credentials in the `config.yml` file and - if needed - adjust the other options.
-
-Be mindful when capturing many streams at once to have plenty of space on disk and the bandwidth available or you'll end up dropping a lot of frames and the files will be useless.
-
-Before you can start capturing streams you first need to add models to your "favourite users" list, once you've done this you're ready to start showuptv-node by running `node main.js`.
-
-> Note: Showup.tv allows you to create only one stream per model. You can watch several models simultaneously, but you will not be able to watch one model in two browser's tabs or record and watch in the
-browser simultaneously.
+Install requirements, run `npm install` in the same folder as main.js is. Add models you want to capture to config.yml file.
 
 Running & Output
 ===========
