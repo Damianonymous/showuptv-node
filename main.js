@@ -150,10 +150,12 @@ function mainLoop() {
 
       $('li[transcoderaddr][streamid]').each((i, e) => {
         // printDebugMsg(e);
+        const $e = $(e);
+
         onlineModels.push({
-          model: $(e).find('.stream__meta h4').text(),
-          streamServer: e.attribs.transcoderaddr,
-          playpath: e.attribs.streamid,
+          model: $e.find('.stream__meta h4').text(),
+          streamServer: $e.attr('transcoderaddr'),
+          playpath: $e.attr('streamid'),
         });
       });
 
@@ -180,10 +182,11 @@ function mainLoop() {
 }
 
 Promise
-  .try(() => session.get('http://showup.tv/site/accept_rules/yes?ref=http://showup.tv/site/log_in', {
-    headers: {
-      referer: 'http://showup.tv/site/accept_rules?ref=http://showup.tv/site/log_in',
-    },
+  .try(() => session.get('https://showup.tv/site/accept_rules?ref=https://showup.tv/'))
+  .then(() => session.post('https://showup.tv/site/accept_rules?ref=https://showup.tv/', {
+    decision: true,
+  }, {
+    referer: 'http://showup.tv/site/accept_rules?ref=http://showup.tv/site/log_in',
   }))
   .then(() => mkdirpAsync(captureDirectory))
   .then(() => mkdirpAsync(completeDirectory))
